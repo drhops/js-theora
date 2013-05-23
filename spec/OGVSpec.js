@@ -10,11 +10,56 @@ describe("OGV loader", function () {
 		
 		return sOut;
 	};
+
+    var full_data;
+    function getBlob(url) {
+        var xhr = new XMLHttpRequest();  // Create new XHR object
+        xhr.open("GET", url);            // Specify URL to fetch
+        xhr.responseType = "blob";        // We'd like a Blob, please
+        xhr.onload = function() {        // onload is easier than onreadystatechange
+            var blob= xhr.response;      // Pass the blob to our callback
+            var reader = new FileReader();
+            reader.onloadend = function(file)
+            {
+                full_data = file.target.result;
+            }
+            full_data = reader.readAsBinaryString(blob);
+        };                                // Note .response, not .responseText
+        xhr.send(null);                  // Send the request now
+    }
+
+    getBlob("http://0.0.0.0:8000/data/smalltest.ogg");
+    it("test data reading", function () {
+
+    /*    // Check for the various File API support.
+        if (window.File && window.FileReader && window.FileList && window.Blob) {
+            // Great success! All the File APIs are supported.
+        } else {
+            throw new Error('The File APIs are not fully supported in this browser.');
+        }
+
+        var reader = new FileReader();
+        var ogv = new OGV();
+        var file = new File();
+
+        reader.onload = function(event) {
+            var data = event.target.result;
+            ogv.dataDownloaded(data);
+        };
+
+        reader.onerror = function(event) {
+            console.error("File could not be read! Code " + event.target.error.code);
+        };
+        reader.readAsText();
+
+        expect(true).toEqual(true);
+     */
+    });
 	
 	it("barfs on bad codec", function () {
 		var data = sToRaw("4F67675300020000000000000000BB2CA23B0000000045A89A7F012A807469666F7261030201002800170002800001680008000000190000000100000100");
 		var ogv = new OGV("");
-		
+
 		var raised = false;
 		try {
 			ogv.dataDownloaded(data);
@@ -22,7 +67,7 @@ describe("OGV loader", function () {
 		} catch (e) {
 			raised = true;
 		}
-		
+
 		expect(raised).toEqual(true);
 	});
 	
