@@ -1,0 +1,633 @@
+var OGV = function () {
+    this.raw = null;
+    this.header = null;
+    this.state = OGV.NOT_LOADED;
+};
+
+OGV.prototype.download = function (url, cb, jq) {
+    this.state = OGV.DOWNLOADING;
+
+    if (!jq) {
+	jq = $;
+    }
+
+    var obj = this;
+
+    jq.ajax({
+	url: url,
+	beforeSend: function ( xhr ) {
+	    xhr.overrideMimeType("text/plain; charset=x-user-defined");
+	},
+    }).done(function ( data ) {
+	obj.dataDownloaded(data);
+	cb();
+    });
+};
+
+OGV.prototype.dataDownloaded = function (data) {
+    this.raw = new RawData(data);	
+};
+
+
+OGV.prototype.readNextPage = function () {
+    var pageHeader = this.readPageHeader();
+    
+    var out = {pageHeader: pageHeader, segments: []};
+    
+    for (var i=0; i < pageHeader.segmentSizes.length; i++) {
+	out.segments.push(this.readSegment());
+    }
+    
+    return out;
+};
+
+
+OGV.prototype.readPageHeader = function () {
+    // http://en.wikipedia.org/wiki/Ogg_page
+    
+    var page = {};
+
+    // read OGG page
+    // read ogg magic number from header "OggS"
+    if (this.raw.readByte() !== 0x4f || this.raw.readByte() !== 0x67 
+	|| this.raw.readByte() !== 0x67 || this.raw.readByte() !== 0x53) {
+	throw new Error("Magic doesn't match");
+    }
+
+    // ** read page version (8 bits) **
+    // version of the Ogg format. should be 0 for now
+    page.version = this.raw.readByte();
+
+    if (page.version !== 0) {
+	throw new Error("Version is " + version);
+    }
+
+    // ** read header type (8 bits) **
+
+    // This is an 8 bit field of flags, which indicates the type of page that follows. 
+    // The rightmost or least significant bit is considered bit 0, with value 0x01, 
+    // the next least significant digit is bit 1, with value 0x02. The third is bit 2, with 
+    // value 0x04, and so on.
+
+    page.headerType = this.raw.readByte();
+
+    // ** read Granule Position (64 bits) **
+    // A granule position is the time marker in Ogg files. It is an abstract value, 
+    // whose meaning is determined by the codec. It may for example be a count of the 
+    // number of samples, the number of frames or a more complex scheme.
+
+    page.granulePos = this.raw.readBytes(8);
+    
+
+    // ** read bitstream serial number (32 bits) **
+    // This field is a serial number that identifies a page as belonging to a particular logical 
+    // bitstream. Each logical bitstream in a file has a unique value, and this field allows 
+    // implementations to deliver the pages to the appropriate decoder. In a typical Vorbis 
+    // and Theora file, one stream is the audio (Vorbis), and the other is the video (Theora)
+
+    
+    page.serialNum  = this.raw.readBytes(4);
+
+    // ** read Page sequance number (32 bits) **
+    // This field is a monotonically increasing field for each logical bitstream. 
+    //  The first page is 0, the second 1, etc. This allows implementations to detect when 
+    // data has been lost.
+
+    page.pageSeqNum = this.raw.readBytes(4);
+
+    // ** read checksum (32 bits) **
+    // used to make sure data isnt corrupted
+
+    page.crc = this.raw.readBytes(4);
+    
+    // ** read page segments (8 bits) **
+    // This field indicates the number of segments that exist in this page. 
+    // It also indicates how many bytes are in the segment table that follows this field. 
+    // There can be a maximum of 255 segments in any one page.
+
+    page.numberPageSegments = this.raw.readBytes(1);
+
+    page.segmentSizes = [];
+    var packetSize = 0;
+    var runningSegment = 0;
+
+    // ** read segment table **
+    // The segment table is an vector of 8-bit values, each indicating the length of the 
+    // corresponding segment within the page body. The number of segments is determined from 
+    // the preceding Page Segments field. Each segment is between 0 and 255 bytes in length.
+
+    // The segments provide a way to group segments into packets, which are meaningful units of 
+    // data for the decoder. When the segment's length is indicated to be 255, this indicates that 
+    // the following segment is to be concatenated to this one and is part of the same packet. 
+    // When the segment's length is 0–254, this indicates that this segment is the final segment 
+    // in this packet. Where a packet's length is a multiple of 255, the final segment is length 0.
+
+    // Where the final packet continues on the next page, the final segment value is 255, and the 
+    // continuation flag is set on the following page to indicate that the start of the new page 
+    // is a continuation of last page.
+
+    for (var i=0; i < page.numberPageSegments; i++) {
+	var segSize = this.raw.readByte();
+	packetSize += segSize;
+	
+	runningSegment += segSize;
+	
+	if (segSize < 255) {
+	    page.segmentSizes.push(runningSegment);
+	    runningSegment = 0;
+	}
+    }
+    
+    page.size = packetSize;
+
+    return page;
+};
+
+OGV.prototype.readSegment = function () {
+    // http://wiki.xiph.org/OggTheora
+    //https://vob2mkv.svn.codeplex.com/svn/tags/release-1.0.1/mkvmerge/common/theora.cpp
+    
+    var packType = this.raw.readByte();
+    
+    console.log("Type is " + packType);
+
+    var codec = "";
+    for (var i=0; i < 6; i++) {
+	var c = this.raw.readByte();
+	codec += String.fromCharCode(c);
+    }
+
+    if (codec !== "theora") {
+	throw new Error("Bad codec " + codec);
+    }
+    
+    var out = null;
+    
+    if (packType === 0x80) {
+	out = this.readIdHeader();
+    } else if (packType === 0x81) {
+	out = this.readCommentHeader();
+    } else if (packType == 0x82) {
+	out = this.readSetupHeader();
+    } else {
+	throw new Error("Bad header type " + packType);
+    }
+    
+    return out;
+};
+
+OGV.prototype.readCommentHeader = function () {
+    var header = {};
+    
+    var raw = this.raw;
+    
+    var readerFn = function () {
+	var commentLength = 0;
+	for (var i=0; i < 4; i++) {
+	    var byte = raw.readByte();
+	    commentLength |= (byte << (i*8));
+	}
+	
+	return commentLength;
+    };
+    
+    var commentLength = readerFn();
+    
+    var vendor = this.raw.readAsString(commentLength);
+    header.vendor = vendor;
+    
+    header.comments = [];
+    var numComments = readerFn();
+    for (var i=0; i < numComments; i++) {
+	var commentLen = readerFn();
+	header.comments.push(this.raw.readAsString(commentLen));
+    }
+    
+    return header;
+};
+
+OGV.prototype.ilog = function (x) {
+    
+    var i = 0;
+    while (x) {
+	x = x >> 1;
+	i++;
+    }
+    
+    return i;
+};
+
+OGV.prototype._getBMSIndex = function (i, j,nbms) {
+    return i*nbms +j;
+};
+
+OGV.prototype._getNqrsIndex = function (i, j) {
+    return i * 3 + j;
+};
+
+OGV.prototype._getQmatIndex = function (i) {
+    return i * 2 ;
+};
+
+OGV.prototype._getQrSizesIndex = function (i, j, k) {
+    return ((i * 3) + j) * 63 + k;
+};
+
+OGV.prototype._getQrbmisIndex = function (i, j, k) {
+    return ((i * 3) + j) * 64 + k;
+};
+
+
+/**
+*  #### OGV.decodeQuantParams() should be called immediately after this ###
+*
+*
+*/ 
+OGV.prototype.decodeLoopFilterLimitTable() = function ()
+{
+    // Section 6.4.1
+
+
+    // Theora Section 6.4.1
+    // Loop Filter Limit Table Decode
+
+    var nbits = this.raw.readBits(3);
+    
+    var lflims=[];
+
+    for (var i=0; i < 64; i++) {
+	lflims.push(this.raw.readBits(nbits));
+    }
+    return lflims;
+}
+
+
+/**
+*  #### OGV.decodeDCTHuffTables() should be called immediately after this ###
+*
+*
+*/ 
+
+OGV.prototype.decodeQuantParams() = function() 
+{
+    var params={};
+    var nbits = this.raw.readBits(4) + 1;
+
+    // step 2
+    params.acscale = [];
+    for (var i=0; i < 64; i++) {
+	// step 2a
+	params.acscale.push(this.raw.readBits(nbits));
+    }
+    
+    // step 3
+    nbits = this.raw.readBits(4) + 1;
+    
+    // step 4
+
+    params.dcscale = [];
+    for (var i=0; i < 64; i++) {
+	// step 4a
+	params.dcscale.push(this.raw.readBits(nbits));
+    }
+    
+    // step 5
+    params.nbms = this.raw.readBits(9) + 1;
+    if (params.nbms > 384) {
+	throw new Error("Invalid nbms " + params.nbms);
+    }
+    
+    // step 6
+
+    // bms represents a 2d array BMS[bmi][ci]
+    params.bms = [];
+    for (var i=0; i < 64 * params.nbms; i++) {
+	// step 6a
+	params.bms.push(this.raw.readBits(8));
+    }
+    
+    // nqrs represents a 2d array NQRS[qti][pli]
+    params.nqrs = [];
+    // qrsizes represents a 2d array QRSIZES[qti][pli]
+    params.qrsizes = [];
+    // qrbmis represents a 2d array QRBMIS[qti][pli]
+    params.qrbmis = [];
+    // 7
+    for (var qti = 0; qti < 2; qti++) {
+	// 7a
+	for (var pli = 0; pli < 3; pli++) {			
+	    
+	    // 7ai, 7aii
+	    var newQr;
+
+	    if (qti > 0 || pli > 0) {
+		newQr = this.raw.readBits(1);
+	    }
+	    else
+	    {
+		newQr = 1;
+	    }
+	    //7a iii
+	    
+	    if (newQr === 0) {
+		// copying old quant ranges
+
+		// 7aiii - A,B
+		var rpqr;
+		if (qti > 0) {
+		    rpqr = this.raw.readBits(1);
+		}
+		else
+		{
+		    rpqr = 0;
+		}
+		
+		// 7aiii - C,D
+		var qtj, plj;
+		if (rpqr === 1) {
+		    qtj = qti - 1;
+		    plj = pli;
+		} else {
+		    qtj = Math.floor((3 * qti + pli - 1)/3);
+		    plj = (pli + 2) % 3;
+		}
+		
+		// 7aiii - E,F,G
+		params.nqrs[this._getNqrsIndex(qti, pli)] = params.nqrs[this._getNqrsIndex(qtj, plj)];
+		for (var i=0; i < 64; i++) {
+		    if (i < 63) {
+			// this only has 63 entries compared to the 64 of qrbmis
+			// do update for 0 - 63
+			params.qrsizes[this._getQrSizesIndex(qti, pli, i)] = params.qrsizes[this._getQrSizesIndex(qtj, plj, i)];
+		    }
+		    params.qrbmis[this._getQrbmisIndex(qti, pli, i)] = params.qrbmis[this._getQrbmisIndex(qtj, plj, i)];
+		}
+	    } else if (newQr === 1){
+		// 7a iv
+		// new set of quant ranges		
+
+		// 7a iv - A,B
+		var qri = 0, qi = 0;
+		
+		// 7a iv - C
+		var readLen = this.ilog(params.nbms - 1);				
+		
+		var readBmis = this.raw.readBits(readLen); 
+
+		if (readBmis >= params.nbms) {
+		    // the read bits are larger than expected
+		    throw new Error("OGV.decodeQuantParams: Stream is undecodable");
+		}
+
+		paramas.qrbmis[this._getQrbmisIndex(qti, pli, qri)] = readBmis;
+	
+	
+		while (true) {
+		    
+		    // 7a iv - D
+		    var readValue = this.raw.readBits(this.ilog(62-qi)) + 1;
+		    
+		    paramas.qrsizes[this._getQrSizesIndex(qti, pli, qri)] = readValue;					
+		    // 7a iv - E
+		    qi += readValue;					
+		    // 7a iv - F
+		    qri++;
+
+		    // 7a iv - G
+		    paramas.qrbmis[this._getQrbmisIndex(qti, pli, qri)] = this.raw.readBits(readLen);
+		    
+
+		    if (qi > 63) {
+			// 7a iv - I
+			throw new Error("OGV.decodeQuantParams: Stream is undecodable");
+
+		    } else if (qi === 63) {
+			break;
+		    }
+		    // 7a iv - H
+		}
+		// 7a iv - J
+		paramas.nqrs[this._getNqrsIndex(qti, pli)] = qri;
+	    } else {
+		throw new Error("newQr is " + newQr);
+	    }
+	}
+    }
+    
+    return params;
+}
+
+/**
+*
+*
+*
+*
+*
+*/
+
+OGV.prototype.decodeDCTTokenHuffTables() = function() 
+{
+}
+
+OGV.prototype.readSetupHeader = function () {
+    // http://www.theora.org/doc/Theora.pdf 
+    // Section 6.4.5
+    // preforms:
+    // 6.4.1
+    // 6.4.2
+    // 6.4.4
+
+    var header = {};
+    
+    header.lflims = this.decodeLoopFilterLimitTable();
+    
+    // 6.4.2 Quantization Parameters Decode
+    var params = this.decodeQuantParams();
+    
+    header.acscale = params.acscale;
+    header.dcscale = params.dcscale;
+    header.nbms = params.nbms;
+    header.bms = params.bms;
+    header.nqrs = params.nqrs;
+    header.qrsizes = params.qrsizes;
+    header.qrbmis = params.qrbmis;
+    
+    // 6.4.4 DCT Token Human Tables    
+    return header;
+};
+
+/*
+* 6.4.3 Computing a Quantization Matrix
+
+* creates a 64-element array of quantization values for each DCT coefficient in natural order 
+*
+* The following procedure can be used to generate a single quantization matrix
+* for a given quantization type, color plane, and qi value, given the quantization
+* parameters decoded in Section 6.4.2.
+*
+* Note that the product of the scale value and the base matrix value is in units
+* of 100ths of a pixel value, and thus is divided by 100 to return it to units of a
+* single pixel value. This value is then scaled by four, to match the scaling of the
+* DCT output, which is also a factor of four larger than the orthonormal version
+* of the transform.
+*/
+
+OGV.prototype.computeQMat = function(qti,pli,qi,header)
+{
+    
+    // 6.4.3 Computing a Quantization Matrix
+
+    // choose qri such that qi is >= to sum of before qri
+    // and adding the next index will be >= qri
+    var qri =0;
+
+    var prevsum =0;
+    var sum;
+    var qri_set =0;
+
+    // i = the qri that we are testing
+
+    for (var i =0; i< 63;i++)
+    {
+	// prevsum = SUM( QRSIZES[qti,pli,0...i-1] )
+	// sum = SUM( QRSIZES[qti,pli,0...i] )
+
+	sum = prevsum + header.qsizes(this._getQrSizesIndex(qti,pli,i))
+	
+
+	if(qi >= prevsum && qi <= sum)
+	{
+	    // found qri that meets conditions
+	    qri = i;
+	    qri_set = 1;
+	    break;
+	}
+	prevsum=sum;
+    }
+    
+    if(! qri_set )
+    {
+	throw new Error("OGV.computeQMat: suitable qri not found");
+    }
+
+    // 2
+    var qistart = prevsum;
+
+    // 3
+    var qiend = sum;
+
+    // 4
+    var bmi = header.qrbmis(this._getQrbmisIndex(qti,pli,qri))
+
+    // 5
+    var bmj = header.qrbmis(this._getQrbmisIndex(qti,pli,qri+1))
+
+    var qrs = header.qrsizes(this._getQrSizesIndex(qti,pli,qri));
+
+    var qmat=[]
+    var bm = [];
+    // 6
+    for( var ci =0 ; ci < 64; ci++)
+    {
+	// 6a
+	var bms_i = header.bms(this._getBMSIndex(bmi,ci));
+	var bms_j = header.bms(this._getBMSIndex(bmj,ci));
+
+
+	bm[ci] = Math.floor(((2*qiend-qi)*bms_i  + 2*(qi-qistart)*bms_j+qrs)/(2*qrs));
+
+	// 6b
+	// ci == 0, qti == 0 | qmin = 2^(3+1+0) = 16
+	// ci > 0, qti == 0  | qmin = 2^(3+0+0) = 8
+	// ci == 0, qti == 1 | qmin = 2^(3+1+1) = 32
+	// ci > 0, qti == 1  | qmin = 2^(3+0+1) = 16
+
+	var qmin = 2^(3 +(ci > 0 ? 0:1)+qti);
+
+	// 6c,d
+	var qscale = ( ci == 0 ? header.dcscale[qi] : acscale[qi]);
+
+	// 6e
+	header.qmat [ci] = Math.max(qmin,Math.min(Math.floor(qscale*bm[ci]/100)*4,4096));
+
+    }
+    return qmat;
+}
+
+
+
+OGV.prototype.readIdHeader = function () {
+    var version = this.raw.readBytes(3);
+    if (version !== 197121) {
+	throw new Error("Theora version: " + version);;
+    }
+
+    var header = {};
+
+    // frame w/h in macroblocks
+    header.fmbw = this.raw.readBytes(2);
+    header.fmbh = this.raw.readBytes(2);
+    
+    console.log("fmbh: " + header.fmbh);
+
+    // picture w/h and offset in pixels
+    header.picw = this.raw.readBytes(3);
+    header.pich = this.raw.readBytes(3);
+    header.picx = this.raw.readBytes(1);
+    header.picy = this.raw.readBytes(1);
+
+    // frame rate numerator and denominator
+    header.frn = this.raw.readBytes(4);
+    if (header.frn <= 0) {
+	throw new Error("Frn is " + header.frn);
+    }
+    header.frd = this.raw.readBytes(4);
+
+    // pixel aspect ratio numerator + denominator
+    header.parn = this.raw.readBytes(3);
+    header.pard = this.raw.readBytes(3);
+
+    // here's where it maybe gets screwy
+
+    // colorspace
+    header.cs = this.raw.readBytes(1);	
+
+    // bitrate in bits/s
+    header.nombr = this.raw.readBytes(3);
+
+    // quality hint
+    header.qual = this.raw.readBits(6);
+
+    // amount to shift keyframe by in the granule position
+    header.kfgshift = this.raw.readBits(5);
+
+    // pixelformat
+    header.pf = this.raw.readBits(2); 
+
+    // reserved
+    header.res = this.raw.readBits(3);
+    
+    if (header.res !== 0) {
+	throw new Error("Reserved === " + header.res);
+    }
+
+    if ((0 != header.parn) && (0 != header.pard)) {
+	if ((header.fmbw / header.fmbh) < (header.parn / header.pard)) {
+	    header.display_width  = Math.floor(header.fmbw * header.parn / header.pard);
+	    header.display_height = header.fmbh;
+	} else {
+	    header.display_width  = header.fmbw;
+	    header.display_height = Math.floor(header.fmbh * header.pard / header.parn);
+	}
+    }
+    
+    header.display_height *= 16;
+    header.display_width  *= 16;
+
+    return header;
+};
+
+OGV.NOT_LOADED = 1;
+OGV.DOWNLOADING = 2;
+
+_.bindAll(OGV);
