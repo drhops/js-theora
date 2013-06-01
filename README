@@ -1,0 +1,72 @@
+*************************************************
+**** OGG THEORA VIDEO DECODER ( OTV DECODER) ****
+*************************************************
+
+This package is used to decode video, that has been encoded with the Theora codec and packaged via Ogg.
+
+
+#################
+### Over View ###
+#################
+
+
+--- Ogg ---
+
+The Ogg format is a container for grabbing bit-streams of information that usually has a logical ordering
+ (Part A comes, then part B then Part C, etc).  In addition it allows multiplexing, so multiple stream types (audio/visual),
+ can be woven together within the stream instead of having to stream all the video first, and then all the audio.
+ For our purposes we only care about just streaming video.  The Ogg format divides this information into packets, and then
+ combines those packets into pages for sending.  Each page has a header that gives information about how many packets are stored,
+ whether this is the last page and whether some packets from previous page are continuing onto this packet.
+
+Further information about the way the Ogg format is packed can be found here http://www.xiph.org/ogg/doc/framing.html
+
+--- Theora ---
+
+The Theora codec is used to efficiently compress and stream video frames.
+
+######################
+#### Architecture ####
+######################
+
+There are 3 main modules, Ogg, Theora and OTV.
+
+The Ogg module deals with extracting packets from the Ogg container file
+
+The Theora module deals with decoding the packets extracted from the Ogg container
+
+The OTV module utilizes the Theora and Ogg modules to convert an Ogg file from data to a meaningful video
+
+There is also another module RawData that is a wrapper class for the binary data and is used to read bits/bytes and ints.
+
+
+@@@@@@@@@@@@@@@@@@
+@@@ Motivation @@@
+@@@@@@@@@@@@@@@@@@
+
+We are encoding video footage using the Theora codec and packaging it for streaming using the Ogg framework.  As a result,
+the Theora data gets chunked up into packets and distributed using Ogg pages.  This prevents us from directly decoding the
+file stream using the Theora codec.  We first have to extract meaningful chunks of theora data from the Ogg framework.
+
+Originally the code was designed where this packet extraction and data decoding was done in line with each other in one module.
+I found this confusing because it was hard to differentiate which methods were created for dealing with Ogg vs Theora.
+
+To make this clearer as well as deal with the fact the Ogg chunks up Theora data, I created the two Ogg and Theora Modules.
+I belive this way is nicer, because the Ogg module doesnt need to know about Theora, all it does is extract packets.  Likewise,
+the Theora module doesnt need to know about Ogg, and all it does is get fed packets and then decode them properly.
+
+
+##########################
+### Unit Tests / Specs ###
+##########################
+
+I've created 3 Unit Test classes to make sure the RawData, Ogg and Theora modules work correctly.
+
+The RawData class uses data created by hand for testing.
+
+The Ogg class uses a sample .ogg file to ensure it is working properly.
+
+I've then created a python function, that strips the .ogg file of all the Ogg overhead and leaves a file that has data
+purely encoded with Theora.  I've then used this and segments of this to test the Theora module to make sure it
+properly reads in the headers.
+

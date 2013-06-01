@@ -2,23 +2,34 @@
   "http://www.w3.org/TR/html4/loose.dtd">
 <html>
 <head>
-  <title>Jasmine Spec Runner</title>
+    <title>Jasmine Spec Runner</title>
 
-  <link rel="shortcut icon" type="image/png" href="lib/jasmine-1.3.1/jasmine_favicon.png">
-  <link rel="stylesheet" type="text/css" href="lib/jasmine-1.3.1/jasmine.css">
-  <script type="text/javascript" src="lib/jasmine-1.3.1/jasmine.js"></script>
-  <script type="text/javascript" src="lib/jasmine-1.3.1/jasmine-html.js"></script>
-  <script type="text/javascript" src="lib/underscore.js"></script>
+    <link rel="shortcut icon" type="image/png" href="lib/jasmine-1.3.1/jasmine_favicon.png">
+    <link rel="stylesheet" type="text/css" href="lib/jasmine-1.3.1/jasmine.css">
+    <script type="text/javascript" src="lib/jasmine-1.3.1/jasmine.js"></script>
+    <script type="text/javascript" src="lib/jasmine-1.3.1/jasmine-html.js"></script>
+    <script type="text/javascript" src="lib/underscore.js"></script>
 
   <!-- include source files here... -->
-  <script type="text/javascript" src="src/rawdata.js"></script>
-    <script type="text/javascript" src="src/OGVHeader.js"></script>
-    <script type="text/javascript" src="src/OGVHeaderDecoder.js"></script>
-    <script type="text/javascript" src="src/OGV.js"></script>
+    <script type="text/javascript" src="src/RawData.js"></script>
+
+    <script type="text/javascript" src="src/Theora/TheoraHeader.js"></script>
+    <script type="text/javascript" src="src/Theora/TheoraUtils.js"></script>
+    <script type="text/javascript" src="src/Theora/TheoraHeaderDecoder.js"></script>
+    <script type="text/javascript" src="src/Theora/TheoraFrameDecoder.js"></script>
+
+
+    <script type="text/javascript" src="src/Ogg/OggPageHeader.js"></script>
+    <script type="text/javascript" src="src/Ogg/OggDecoder.js"></script>
 
   <!-- include spec files here... -->
-  <script type="text/javascript" src="spec/RawDataSpec.js"></script>
-  <script type="text/javascript" src="spec/OGVSpec.js"></script>
+    <script type="text/javascript" src="spec/RawDataSpec.js"></script>
+    <script type="text/javascript" src="spec/OggDecoderSpec.js"></script>
+    <script type="text/javascript" src="spec/TheoraDecoderSpec.js"></script>
+
+
+
+
 
   <script type="text/javascript">
     (function() {

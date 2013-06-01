@@ -133,7 +133,11 @@ RawData.prototype.readBitsAsInteger = function (numBits,signed) {
 };
 
 RawData.prototype.skipBytes = function (numBytes) {
-	this.bitIndex += (numBytes *8);
+    this.bitIndex += (numBytes *8);
+};
+
+RawData.prototype.skipBits = function (numBits) {
+    this.bitIndex += (numBits);
 };
 
 RawData.prototype.readByte = function () {
