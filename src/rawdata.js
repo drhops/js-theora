@@ -86,6 +86,16 @@ RawData.prototype.readBits = function (numBits) {
 	return output;
 };
 
+/**
+ * returns the bit read as an unsigned int
+ * @returns {*}
+ */
+RawData.prototype.readBitAsInteger = function ()
+{
+    return this.readBitsAsInteger(1,false);
+};
+
+
 RawData.prototype.readByteAsInteger = function (signed)
 {
     return this.readBytesAsInteger(1,signed);
